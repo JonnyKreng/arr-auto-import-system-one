@@ -20,8 +20,8 @@ public interface IImportContextBuilder
 
     /// <summary>
     /// Builds the single <c>mapping</c> choice question. Enforces the option cap: at most
-    /// <see cref="ImportContextBuilder.MaxCandidates"/> candidates plus one <c>no_match</c> slot
-    /// (systemOne.md §7).
+    /// <see cref="ImportContextBuilder.MaxCandidates"/> candidates plus the reserved
+    /// <c>no_match</c> and <c>album_mismatch</c> outcomes (systemOne.md §7).
     /// </summary>
     SystemOneQuestion BuildQuestions(ManualImportFile row, IReadOnlyList<Candidate> candidates, out IReadOnlyList<Candidate> offered);
 

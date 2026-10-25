@@ -1,24 +1,15 @@
-# AMD Radeon / Vulkan deployment stack for the System One provider.
+# AMD Radeon / Vulkan deployment override for the System One provider.
 #
-# This file is a complete stack: it includes compose.yaml (the ArrImportSystemOne app and shared
-# volumes) and replaces the CUDA provider with the Vulkan build below. Run it on its own:
-#
-#   docker compose -f compose.vulkan.yaml up -d --build
+# Usage on the Radeon host:
+#   docker compose -f compose.yaml -f compose.vulkan.yaml up -d --build
 #
 # The host must have a working amdgpu/Mesa Vulkan stack and expose /dev/dri. Check inside the
 # container after startup:
-#   docker compose -f compose.vulkan.yaml exec systemone vulkaninfo --summary
+#   docker compose -f compose.yaml -f compose.vulkan.yaml exec systemone vulkaninfo --summary
 #
-# Build on the Radeon host (native linux/amd64) for deployment. A Mac-built image is arm64 and will
-# not run on a typical x86_64 Radeon host; use `docker buildx build --platform linux/amd64` if you
-# intentionally cross-build.
-#
-# This stack intentionally does not use the NVIDIA device reservation. If /dev/dri is not
+# This override intentionally does not use the NVIDIA device reservation. If /dev/dri is not
 # available (for example Docker Desktop on macOS), use compose.local.yaml for a UI/plumbing stub;
 # macOS cannot pass its Metal GPU through to a Linux container.
-
-include:
-  - compose.yaml
 
 services:
   systemone:
@@ -39,10 +30,10 @@ services:
     environment:
       MICA_GGUF: ${SYSTEMONE_MODEL:-mica-v0.5-4b-Q8_0.gguf}
       MICA_NAME: ${SYSTEMONE_MODEL_NAME:-mica-v0.5-4b}
-      # A 12 GB Radeon fits Q8_0 with one 32k sequence. If the driver reports an out-of-memory
-      # error, use SYSTEMONE_MODEL=mica-v0.5-4b-IQ4_XS.gguf or lower SYSTEMONE_VULKAN_N_CTX.
+      # A 12 GB Radeon fits Q8_0 with two sequences. If the driver reports an out-of-memory
+      # error, use SYSTEMONE_MODEL=mica-v0.5-4b-IQ4_XS.gguf or lower SYSTEMONE_VULKAN_SEQS.
       SYSTEMONE_N_CTX: ${SYSTEMONE_VULKAN_N_CTX:-32768}
-      SYSTEMONE_SEQS: ${SYSTEMONE_VULKAN_SEQS:-1}
+      SYSTEMONE_SEQS: ${SYSTEMONE_VULKAN_SEQS:-2}
       SYSTEMONE_STATE_CACHE: ${SYSTEMONE_VULKAN_STATE_CACHE:-off}
       SYSTEMONE_N_UBATCH: ${SYSTEMONE_VULKAN_N_UBATCH:-256}
     healthcheck:

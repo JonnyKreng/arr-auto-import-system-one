@@ -46,8 +46,13 @@ POST /v1/systemone
     "artist": "Artist",
     "album": "Album",
     "album_release_id": 10,
+    "target_release": "Album",
     "quality": "FLAC",
     "rejections": [],
+    "file_tags": {
+      "title": "Song", "artist": "Artist", "album": "Album",
+      "track_numbers": [1], "disc_number": 1, "duration": "3:20"
+    },
     "tracks": [{ "title": "Song", "number": "1", "duration": "3:20", "has_file": false }],
     "download_name": "Artist - Album",
     "download_title": "Artist - Album",
@@ -56,11 +61,12 @@ POST /v1/systemone
   "questions": {
     "mapping": {
       "type": "choice",
-      "instructions": "Task: match the downloaded audio file to exactly one track of the target album. ...",
+      "instructions": "Task: match the downloaded audio file to exactly one offered track, or choose the outcome that says why it cannot be matched. ...",
       "criteria": {
-        "option_0": "title: 'Song' | length: 3:20 | track: 1",
-        "option_1": "title: 'Other' | length: 4:01 | track: 2",
-        "no_match": "none of the listed tracks is the downloaded track"
+        "option_0": "release: \"Album\" | title: \"Song\" | length: 3:20 | track: 1",
+        "option_1": "release: \"Album\" | title: \"Other\" | length: 4:01 | track: 2",
+        "no_match": "different album or artist, not an edition of the target album",
+        "album_mismatch": "different edition/re-recording, ambiguous album, or unoffered song"
       }
     }
   }
@@ -233,22 +239,28 @@ For one job (download):
      "already fully parsed" fast path.** Every non-additional row is a Mica decision.
 3. Batch actions per download:
    - any mapped file → one `ImportAsync(files)`
-   - any `no_match` above threshold → `DeleteQueueItemAsync(removeFromClient: true, blocklist: true)`
+   - any `no_match` above threshold **without an album-level uncertainty** →
+     `DeleteQueueItemAsync(removeFromClient: true, blocklist: true)`
+   - `album_mismatch` above threshold, or `no_match` when Lidarr rejected the album match
+     (`Rejection.Type == "Album"` / “Album match…”) or the embedded album is an edition of the
+     target → `LeaveToHuman` (no Lidarr action)
    - failed import (Lidarr left rows) → clear the queue item without blocklist (existing behaviour)
-4. Write `DecisionRecord`s + `JobRecord` + `Done` marker.
+4. Write `DecisionRecord`s + `JobRecord` + `Done` marker. A left-to-human result never writes the
+   `Done` marker, so it can be re-decided after the human fixes the album association.
 
 ### 6.1 Resolve one row with Mica
 
 ```
-candidates = BuildCandidatesAsync(row)        // target release first, then other releases
+candidates = BuildCandidatesAsync(row)        // target release first, same-album editions only
 if candidates == 0:
-    no Mica call → RejectBlock / LeaveToHuman (existing "no candidates" semantics)
+    no Mica call → LeaveToHuman ("No candidate tracks")
 
-options = candidates capped to 254, keyed option_0..option_N
-options["no_match"] = "none of the listed tracks is the downloaded track"
+options = candidates capped to 253, keyed option_0..option_N
+options["no_match"]       = "different album or artist, not an edition of the target album"
+options["album_mismatch"] = "different edition/re-recording, ambiguous album, or unoffered song; leave for human review"
 
 request = {
-  state: BuildModelState(queueItem, row, candidates),
+  state: BuildModelState(queueItem, row),     // includes file_tags + target_release
   questions: { mapping: { type: "choice", instructions: <mapping rules>, criteria: options } }
 }
 
@@ -259,14 +271,16 @@ choice     = response.Answers["mapping"].Choice
 confidence = response.Answers["mapping"].Confidence
 
 if confidence < Model.MinConfidence:        → LeaveToHuman
-if choice == "no_match":                    → RejectBlock
+if choice == "album_mismatch":              → LeaveToHuman
+if choice == "no_match":
+    HasAlbumMismatch(row) ? LeaveToHuman : RejectBlock
 else:
     candidate = candidatesByKey[choice]
     candidate.HasFile ? RejectBlock : Import
 ```
 
-`no_match` and `confidence` replace the old LLM prose parsing. There is no JSON extraction, no
-streaming, no correction prompt, no token-budget escalation, no `reasoning_effort`, `num_ctx`,
+`album_mismatch` and `confidence` replace the old LLM prose parsing. There is no JSON extraction,
+no streaming, no correction prompt, no token-budget escalation, no `reasoning_effort`, `num_ctx`,
 `max_tokens`, or retry loop.
 
 ### 6.2 Keep / adapt from the current code
@@ -296,14 +310,15 @@ streaming, no correction prompt, no token-budget escalation, no `reasoning_effor
 
 Mica accepts **2–255** options for a `choice` question (and up to 32,768 input tokens).
 
-- Reserve one slot for `no_match`: **at most 254 candidates per request**.
-- Candidates are already ordered with the target release first and deduped. When
-  `candidates.Count > 254`, take the first 254 and log a warning with the download/row and the
+- Reserve one slot each for `no_match` and `album_mismatch`: **at most 253 candidates per request**.
+- Candidates are already ordered with the target release first and deduped. Releases whose title
+  clearly belongs to another album are skipped, so unrelated albums cannot pollute the option list.
+  When `candidates.Count > 253`, take the first 253 and log a warning with the download/row and the
   number dropped.
-- If `candidates.Count == 1`, options are `option_0` + `no_match` = 2 → valid.
-- If `candidates.Count == 0`, do not call Mica (a 1-option question is invalid).
+- If `candidates.Count == 1`, options are `option_0` + `no_match` + `album_mismatch` = 3 → valid.
+- If `candidates.Count == 0`, do not call Mica (a 2-option question has no track to choose).
 - Truncation loses the correct answer when it falls beyond the cut. This is accepted for v1:
-  albums with > 254 distinct tracks/releases are rare. Splitting a large candidate set into
+  albums with > 253 distinct tracks/releases are rare. Splitting a large candidate set into
   multiple Mica calls is explicitly out of scope (YAGNI).
 - The input-token limit (32k) is separate. If Mica returns HTTP 400 for oversize input, mark the
   job `Failed` and log the 400 detail; do not retry with a different prompt (YAGNI).
@@ -395,7 +410,7 @@ All UI communication uses **SignalR**; there are no `/api/*` endpoints and no ha
   "decision": { "id": 42, "fileName": "01 - Song.flac", "action": "Import", "status": "Done", "chosen": "..." },
   "request": {
     "state": { "file_name": "01 - Song.flac", "artist": "Artist", "...": "..." },
-    "questions": { "mapping": { "type": "choice", "instructions": "...", "criteria": { "option_0": "...", "no_match": "..." } } }
+    "questions": { "mapping": { "type": "choice", "instructions": "...", "criteria": { "option_0": "...", "no_match": "...", "album_mismatch": "..." } } }
   },
   "result": { "choice": "option_0", "confidence": 0.94, "probabilities": { "option_0": 0.94 }, "latencyMs": 42 }
 }
@@ -421,7 +436,7 @@ Broadcast through `IHubContext<DecisionHub>`; no groups, no per-user filtering (
   `job.finished`.
 - **Info button** (kept): opens a dialog with two tabs:
   - **Request** — pretty-printed `state` + `questions`, including the offered `option_*` /
-    `no_match` criteria (so the 254-candidate cap is visible)
+    `no_match` / `album_mismatch` criteria (so the 253-candidate cap is visible)
   - **Result** — Mica `choice`, `confidence`, `probabilities`, `latencyMs`, plus the action/status
   - Data comes from `GetDecisionDetail`; it survives page reloads because request and result are
     persisted in the decision record.
@@ -496,7 +511,7 @@ public class MicaOptions
 - A persistent pending-job table, retry/backoff tables, job attempts history
 - Multiple Mica question types (`noul` reject question, `score` search term); only `mapping`
   (`choice`) is needed
-- Splitting candidate sets > 254 into multiple requests
+- Splitting candidate sets > 253 into multiple requests
 - Multi-app (Sonarr/Radarr), authentication, dashboards with mutations
 - Model training/calibration; Mica's stock checkpoint is used as-is
 
@@ -534,7 +549,7 @@ systemOne.md                      → this document
 
 1. Add `MicaClient` + DTOs; wire `Lidarr:Mica` options and health check on startup (optional).
 2. Strip `ImportDecisionEngine` down to `ImportContextBuilder`: delete `Classify`,
-   `TryResolveDeterministicMatch`, `RowKind`, `RowClassification`; add the 254-candidate cap in
+   `TryResolveDeterministicMatch`, `RowKind`, `RowClassification`; add the 253-candidate cap in
    `BuildQuestions`.
 3. Introduce `ImportJob`, `JobQueue`, `QueuePoller`, `JobWorker`; port the action helpers
    (`ApplyImport`, `SubmitImportsAsync`, `ApplyRejectsAsync`, `RemoveStaleQueueItemAsync`,
@@ -565,10 +580,13 @@ systemOne.md                      → this document
   a single GPU. Channel capacity bounds memory, not throughput.
 - **No Mica availability means no decisions:** the worker leaves download jobs pending/unprocessed;
   the poller keeps discovering them. Add `/health` logging so a dead sidecar is obvious.
-- **Ordering:** candidates must remain target-release-first so truncation at 254 keeps the most
+- **Ordering:** candidates must remain target-release-first so truncation at 253 keeps the most
   likely tracks. Do not reorder.
 - **Idempotency:** never write the `done` marker on `LeaveToHuman`/failure, otherwise a restart
   cannot retry. The in-memory dedupe set prevents duplicate enqueues while a job is in flight.
-- **Reject+blocklist is destructive** and still gated by `MinConfidence` and `DryRun`.
+- **Reject+blocklist is destructive** and still gated by `MinConfidence` and `DryRun`. A
+  `no_match` is downgraded to `LeaveToHuman` when Lidarr reported an album-level rejection or the
+  embedded album is an edition of the target album, so an edition/re-recording mismatch never
+  blocklists a valid download.
 - **SignalR reconnects:** pushes are fire-and-forget and not replayed. The client always reloads
   `GetSnapshot` after a reconnect; do not rely on an event stream alone to rebuild the table.

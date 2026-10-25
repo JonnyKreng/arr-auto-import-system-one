@@ -273,8 +273,32 @@ public sealed class JobWorker(
                 continue;
             }
 
+            if (answer.Choice == ImportContextBuilder.AlbumMismatchKey)
+            {
+                // The model identified the file as a different edition/re-recording, an unlisted
+                // track, or an ambiguous album. Never turn that into a destructive rejection.
+                decision.Action = "LeaveToHuman";
+                decision.Status = dryRun ? "Applied" : "Failed";
+                decision.Error = "Album or edition mismatch; left to human";
+                plans.Add(new DecisionPlan(decision, PlanKind.LeftToHuman));
+                leftToHuman = true;
+                continue;
+            }
+
             if (answer.Choice == ImportContextBuilder.NoMatchKey)
             {
+                // A track-level no_match on an album Lidarr already flagged as a weak match is
+                // not enough evidence to remove and blocklist the download. Leave it for a human.
+                if (HasAlbumMismatch(row))
+                {
+                    decision.Action = "LeaveToHuman";
+                    decision.Status = dryRun ? "Applied" : "Failed";
+                    decision.Error = "Album match is uncertain; left to human instead of rejecting";
+                    plans.Add(new DecisionPlan(decision, PlanKind.LeftToHuman));
+                    leftToHuman = true;
+                    continue;
+                }
+
                 decision.Action = "RejectBlock";
                 var reject = new DecisionPlan(decision, PlanKind.Reject);
                 plans.Add(reject);
@@ -457,7 +481,7 @@ public sealed class JobWorker(
                 releaseTracks[releaseId] = tracks;
             }
 
-            loaded.Add(new ReleaseTracks(releaseId, tracks));
+            loaded.Add(new ReleaseTracks(releaseId, release.Title, tracks));
         }
 
         var candidates = builder.BuildCandidates(row, loaded);
@@ -509,6 +533,24 @@ public sealed class JobWorker(
         logger.LogInformation(
             "Download {DownloadId} {Status}: {Outcome} ({FileCount} files, {Latency} ms)",
             job.DownloadId, status, outcome, fileCount, latencyMs);
+    }
+
+    private static bool HasAlbumMismatch(ManualImportFile row)
+    {
+        if (row.Rejections.Any(r =>
+                string.Equals(r.Type, "Album", StringComparison.OrdinalIgnoreCase)
+                || (r.Reason?.StartsWith("Album match", StringComparison.OrdinalIgnoreCase) ?? false)))
+            return true;
+
+        var target = ImportContextBuilder.NormalizeTitle(row.Album?.Title);
+        var tagged = ImportContextBuilder.NormalizeTitle(row.AudioTags?.AlbumTitle);
+        if (target.Length == 0 || tagged.Length == 0 || string.Equals(target, tagged, StringComparison.Ordinal))
+            return false;
+
+        // "Speak Now" vs "Speak Now (Taylor's Version)" is an edition mismatch. "Speak Now" vs
+        // "Fearless" is a different album and stays eligible for no_match.
+        return tagged.Contains(target, StringComparison.Ordinal)
+            || target.Contains(tagged, StringComparison.Ordinal);
     }
 
     private static DecisionRecord BaseDecision(ImportJob job, ManualImportFile row, int rowId) => new()

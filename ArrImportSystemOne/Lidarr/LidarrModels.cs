@@ -48,6 +48,9 @@ public sealed class ManualImportFile
     public QualityModel? Quality { get; set; }
     public List<Rejection> Rejections { get; set; } = new();
     public List<LidarrTrack> Tracks { get; set; } = new();
+
+    /// <summary>Tags Lidarr read from the file itself (manual-import <c>audioTags</c>).</summary>
+    public ParsedTrackInfo? AudioTags { get; set; }
 }
 
 public sealed class LidarrArtist
@@ -80,6 +83,25 @@ public sealed class LidarrTrack
     public string? TrackNumber { get; set; }
     public int Duration { get; set; } // milliseconds
     public bool HasFile { get; set; }
+}
+
+/// <summary>
+/// The subset of Lidarr's <c>ParsedTrackInfo</c> that helps identify a file: its embedded
+/// title/artist/album, track numbers, disc and duration. Optional throughout so old Lidarr
+/// versions or files without tags still produce a request.
+/// </summary>
+public sealed class ParsedTrackInfo
+{
+    public string? Title { get; set; }
+    public string? ArtistTitle { get; set; }
+    public string? AlbumTitle { get; set; }
+    public string? ReleaseGroup { get; set; }
+    public string? Disambiguation { get; set; }
+    public TimeSpan Duration { get; set; }
+    public int[] TrackNumbers { get; set; } = Array.Empty<int>();
+    public int DiscNumber { get; set; }
+    public int DiscCount { get; set; }
+    public int Year { get; set; }
 }
 
 public sealed class Rejection

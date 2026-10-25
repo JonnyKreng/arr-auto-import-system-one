@@ -57,8 +57,8 @@ public sealed class JobWorkerTests
                   "id": 7,
                   "title": "Album",
                   "releases": [
-                    { "id": 10, "title": "Target", "trackCount": 3 },
-                    { "id": 11, "title": "Other", "trackCount": 2 }
+                    { "id": 10, "title": "Album (Target Edition)", "trackCount": 3 },
+                    { "id": 11, "title": "Album (Other Edition)", "trackCount": 2 }
                   ]
                 },
                 "albumReleaseId": 10,
@@ -108,7 +108,8 @@ public sealed class JobWorkerTests
 
         using var questions = JsonDocument.Parse(decision.Questions!);
         var criteria = questions.RootElement.GetProperty("mapping").GetProperty("criteria");
-        Assert.Equal(5, criteria.EnumerateObject().Count());
+        Assert.Equal(6, criteria.EnumerateObject().Count());
+        Assert.True(criteria.TryGetProperty("album_mismatch", out _));
 
         var command = Assert.Single(harness.LidarrHandler.Requests, r => r.Uri.EndsWith("/api/v1/command"));
         Assert.Contains("\"trackIds\":[202]", command.Body);
@@ -153,6 +154,86 @@ public sealed class JobWorkerTests
         var delete = Assert.Single(harness.LidarrHandler.Requests, r => r.Method == "DELETE");
         Assert.Contains("removeFromClient=true", delete.Uri);
         Assert.Contains("blocklist=true", delete.Uri);
+    }
+
+    [Fact]
+    public async Task AlbumMismatch_LeavesToHuman_AndDoesNotMarkDone()
+    {
+        using var harness = new Harness(decisionJson: TestData.DecisionJson("album_mismatch", 0.97));
+
+        await harness.Worker.ProcessJobAsync(Job(), CancellationToken.None);
+
+        var decision = Assert.Single(harness.Temp.Repository.GetDecisions(10));
+        Assert.Equal("LeaveToHuman", decision.Action);
+        Assert.Equal("Failed", decision.Status);
+        Assert.Equal("album_mismatch", decision.Chosen);
+        Assert.Contains("mismatch", decision.Error);
+
+        Assert.False(harness.Temp.Repository.IsDownloadDone("dl1"));
+        Assert.DoesNotContain(harness.LidarrHandler.Requests, r => r.Method == "DELETE");
+        Assert.DoesNotContain(harness.LidarrHandler.Requests, r => r.Method == "POST" && r.Uri.EndsWith("/command"));
+    }
+
+    [Fact]
+    public async Task NoMatch_WithAlbumMatchRejection_LeavesToHuman_InsteadOfBlocklisting()
+    {
+        const string manualImport = """
+            [
+              {
+                "id": 1,
+                "path": "/downloads/Taylor Swift-Speak Now (Taylor's Version)/22-Taylor_Swift-Timeless_(Taylors_Version)_(From_The_Vault).flac",
+                "name": "22-Taylor_Swift-Timeless_(Taylors_Version)_(From_The_Vault)",
+                "downloadId": "dl1",
+                "additionalFile": false,
+                "artist": { "id": 5, "artistName": "Taylor Swift" },
+                "album": { "id": 7, "title": "Speak Now" },
+                "albumReleaseId": 36385,
+                "quality": {
+                  "quality": { "id": 7, "name": "FLAC", "source": "Lossless", "modifier": "None" },
+                  "revision": { "version": 1, "real": 0, "isRepack": false }
+                },
+                "rejections": [
+                  { "reason": "Album match is not close enough: 78.9 % vs 80 %", "type": "Album" }
+                ],
+                "audioTags": {
+                  "title": "Timeless (Taylor's Version) (From The Vault)",
+                  "artistTitle": "Taylor Swift",
+                  "albumTitle": "Speak Now (Taylor's Version)",
+                  "releaseGroup": "Speak Now (Taylor's Version)",
+                  "trackNumbers": [22],
+                  "discNumber": 1,
+                  "duration": "00:06:15.0000000",
+                  "year": 2023
+                },
+                "tracks": [
+                  { "id": 101, "title": "Mine", "trackNumber": "1", "duration": 230000, "hasFile": false }
+                ]
+              }
+            ]
+            """;
+
+        using var harness = new Harness(
+            manualImportJson: manualImport,
+            decisionJson: TestData.DecisionJson("no_match", 0.97));
+
+        await harness.Worker.ProcessJobAsync(Job(), CancellationToken.None);
+
+        var decision = Assert.Single(harness.Temp.Repository.GetDecisions(10));
+        Assert.Equal("LeaveToHuman", decision.Action);
+        Assert.Equal("Failed", decision.Status);
+        Assert.Equal("no_match", decision.Chosen);
+        Assert.Contains("uncertain", decision.Error);
+
+        // The model saw Lidarr's own tags, not just the file name.
+        using var state = JsonDocument.Parse(decision.State!);
+        Assert.Equal("Speak Now (Taylor's Version)",
+            state.RootElement.GetProperty("file_tags").GetProperty("album").GetString());
+        Assert.Equal("6:15",
+            state.RootElement.GetProperty("file_tags").GetProperty("duration").GetString());
+
+        Assert.False(harness.Temp.Repository.IsDownloadDone("dl1"));
+        Assert.DoesNotContain(harness.LidarrHandler.Requests, r => r.Method == "DELETE");
+        Assert.DoesNotContain(harness.LidarrHandler.Requests, r => r.Method == "POST" && r.Uri.EndsWith("/command"));
     }
 
     [Fact]

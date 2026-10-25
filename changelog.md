@@ -13,9 +13,17 @@ This release implements the design in [`systemOne.md`](./systemOne.md).
 - **Choice questions omit unset optional flags.** `multi`, `allow_cannot_grade` and
   `abstain_threshold` are no longer serialized as `null`, which Mica rejects on a Choice question.
 - **Candidates now cover the whole album, not just Lidarr's single matched track.** The worker
-  loads every album release's tracks (target release first), dedupes editions by normalized title,
-  and keeps the 254-candidate cap. The persisted state keeps Lidarr's matched row tracks; the full
-  option list lives in the question criteria, avoiding a duplicated prompt.
+  loads every album release's tracks (target release first), skips releases clearly belonging to a
+  different album, dedupes editions by normalized title, and keeps the 253-candidate cap. The
+  persisted state keeps Lidarr's matched row tracks; the full option list lives in the question
+  criteria, avoiding a duplicated prompt.
+- **Confident `no_match` decisions no longer blocklist album/edition mismatches.** The mapping
+  prompt now uses Lidarr's embedded `audioTags`, compares recording versions explicitly
+  (Taylor's Version, live, acoustic, etc.), and offers two reserved outcomes: `no_match` (different
+  album/artist → reject) and `album_mismatch` (different edition/re-recording, ambiguous album, or
+  unoffered song → leave to human). As a safety net, a `no_match` on a row with an album-level
+  Lidarr rejection is also left to human. This fixes the “Speak Now” vs “Speak Now (Taylor's
+  Version)” case, where the target track was never among the offered options.
 - **`docker compose up` no longer needs a hand-built `mica:latest` image.** The System One
   provider service is named `systemone` and now has a `build:` section pinned to a Mica commit,
   so Compose builds it on first use instead of trying to pull a non-existent `mica:latest` image.
@@ -79,9 +87,9 @@ oversubscribed.
 
 #### Context builder
 - `Solver/IImportContextBuilder.cs` / `Solver/ImportContextBuilder.cs` — candidate building,
-  question building (with the **254-candidate cap + `no_match` = 255 options**), state building
-  and `ToImportUpdate`. Candidate order is preserved (target release first) so truncation keeps
-  the most likely tracks.
+  question building (with the **253-candidate cap + `no_match` + `album_mismatch` = 255 options**),
+  state building (including file tags and target release) and `ToImportUpdate`. Candidate order is
+  preserved (target release first) so truncation keeps the most likely tracks.
 - `Solver/DecisionWriter.cs` — single persistence + `decision.resolved` broadcast path shared by
   the poller and worker.
 
@@ -247,8 +255,9 @@ backoff (capped at 10 minutes).
 
 Added `ArrImportSystemOne.Tests` (xUnit + Moq) covering:
 
-- `ImportContextBuilder` — candidate order/dedupe, 254-cap, state fields, import update mapping,
-  duration formatting.
+- `ImportContextBuilder` — candidate order/dedupe, same-album release filtering, 253-cap,
+  reserved outcomes, state fields (file tags/target release), import update mapping, duration
+  formatting.
 - `SystemOneDecisionClient` — request shape/path, answer parsing, 400 → `InvalidRequest`,
   5xx/transport → `Unavailable`, unknown choice → `InvalidResponse`, and `/health` parsing
   (including `warming: true` and 503).
