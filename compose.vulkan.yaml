@@ -1,0 +1,50 @@
+# AMD Radeon / Vulkan deployment stack for the System One provider.
+#
+# This file is a complete stack: it includes compose.yaml (the ArrImportSystemOne app and shared
+# volumes) and replaces the CUDA provider with the Vulkan build below. Run it on its own:
+#
+#   docker compose -f compose.vulkan.yaml up -d --build
+#
+# The host must have a working amdgpu/Mesa Vulkan stack and expose /dev/dri. Check inside the
+# container after startup:
+#   docker compose -f compose.vulkan.yaml exec systemone vulkaninfo --summary
+#
+# Build on the Radeon host (native linux/amd64) for deployment. A Mac-built image is arm64 and will
+# not run on a typical x86_64 Radeon host; use `docker buildx build --platform linux/amd64` if you
+# intentionally cross-build.
+#
+# This stack intentionally does not use the NVIDIA device reservation. If /dev/dri is not
+# available (for example Docker Desktop on macOS), use compose.local.yaml for a UI/plumbing stub;
+# macOS cannot pass its Metal GPU through to a Linux container.
+
+include:
+  - compose.yaml
+
+services:
+  systemone:
+    image: ${SYSTEMONE_VULKAN_IMAGE:-arrimportsystemone-systemone-vulkan:local}
+    build:
+      context: .
+      dockerfile: docker/systemone-vulkan/Dockerfile
+      args:
+        MICA_COMMIT: ${SYSTEMONE_MICA_COMMIT:-a21c3cecefba92b11ee65b53f9241e252752eb52}
+        LLAMA_TAG: ${SYSTEMONE_LLAMA_TAG:-b11700}
+    # The CUDA reservation from compose.yaml does not apply to a Vulkan container.
+    deploy: !reset {}
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video
+      - render
+    environment:
+      MICA_GGUF: ${SYSTEMONE_MODEL:-mica-v0.5-4b-Q8_0.gguf}
+      MICA_NAME: ${SYSTEMONE_MODEL_NAME:-mica-v0.5-4b}
+      # A 12 GB Radeon fits Q8_0 with one 32k sequence. If the driver reports an out-of-memory
+      # error, use SYSTEMONE_MODEL=mica-v0.5-4b-IQ4_XS.gguf or lower SYSTEMONE_VULKAN_N_CTX.
+      SYSTEMONE_N_CTX: ${SYSTEMONE_VULKAN_N_CTX:-32768}
+      SYSTEMONE_SEQS: ${SYSTEMONE_VULKAN_SEQS:-1}
+      SYSTEMONE_STATE_CACHE: ${SYSTEMONE_VULKAN_STATE_CACHE:-off}
+      SYSTEMONE_N_UBATCH: ${SYSTEMONE_VULKAN_N_UBATCH:-256}
+    healthcheck:
+      # The first start downloads the weights and builds the Vulkan pipelines.
+      start_period: 600s

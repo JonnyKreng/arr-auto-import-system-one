@@ -1,7 +1,100 @@
-﻿services:
+﻿# ArrImportSystemOne + System One decision provider (Mica is the current provider).
+# Lidarr is intentionally NOT part of this stack: point LIDARR_URL at your existing instance.
+#
+# Requirements:
+#   - Docker Compose v2.24+ (the Vulkan/local stacks use `include` and `!reset`)
+#   - NVIDIA driver + NVIDIA Container Toolkit for this default CUDA service, OR
+#     amdgpu/Mesa Vulkan + /dev/dri for the Radeon stack (compose.vulkan.yaml)
+#   - Outbound network access for the first build (Mica source) and first start (model weights)
+#
+# Usage:
+#   1. Fill in .env (Lidarr URL/API key, ports).
+#   2. NVIDIA:    docker compose -f compose.yaml up -d --build
+#      Radeon:    docker compose -f compose.vulkan.yaml up -d --build
+#      macOS/UI:  docker compose -f compose.local.yaml up -d --build
+#      macOS CPU: docker compose -f compose.local-model.yaml up -d --build
+#
+# The Vulkan and local files include this file, so they run the ArrImportSystemOne app as well as
+# the provider. The `systemone` service builds the current provider from the pinned Mica source by
+# default. Set SYSTEMONE_IMAGE to a prebuilt image and omit --build to use that instead.
+
+name: arrimportsystemone
+
+services:
   arrimportsystemone:
-    image: arrimportsystemone
+    image: ${ARRIMPORT_IMAGE:-arrimportsystemone:local}
     build:
       context: .
       dockerfile: ArrImportSystemOne/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${ARRIMPORT_HTTP_PORT:-8080}:8080"
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ASPNETCORE_ENVIRONMENT: ${ASPNETCORE_ENVIRONMENT:-Production}
+      TZ: ${TZ:-Etc/UTC}
+      Lidarr__Url: ${LIDARR_URL:-http://host.docker.internal:8686}
+      Lidarr__Key: ${LIDARR_API_KEY:?Set LIDARR_API_KEY in .env}
+      Lidarr__DryRun: ${LIDARR_DRY_RUN:-true}
+      Lidarr__PollIntervalSeconds: ${LIDARR_POLL_INTERVAL_SECONDS:-60}
+      # Provider-neutral decision client. The bundled service is the current System One provider.
+      Lidarr__SystemOne__Url: http://systemone:${SYSTEMONE_CONTAINER_PORT:-8010}
+      Lidarr__SystemOne__TimeoutSeconds: ${SYSTEMONE_TIMEOUT_SECONDS:-120}
+      Lidarr__SystemOne__HealthCheckSeconds: ${SYSTEMONE_HEALTH_CHECK_SECONDS:-15}
+      Lidarr__Model__MinConfidence: ${MODEL_MIN_CONFIDENCE:-0.75}
+    volumes:
+      - arrimport-data:/app/data
+    extra_hosts:
+      # Makes an existing Lidarr on the Docker host reachable as host.docker.internal
+      # on Linux as well as on Docker Desktop.
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      systemone:
+        # Only controls start order. The app pauses decision processing until the provider's
+        # /health check passes, then resumes automatically, so a slow first start is safe.
+        condition: service_started
 
+  systemone:
+    # Current provider: Mica. The image is built from the upstream Dockerfile, pinned by commit.
+    # Override SYSTEMONE_BUILD_CONTEXT with #main or a local path, or set SYSTEMONE_IMAGE to a
+    # prebuilt image and omit --build.
+    image: ${SYSTEMONE_IMAGE:-arrimportsystemone-systemone:local}
+    build:
+      context: ${SYSTEMONE_BUILD_CONTEXT:-https://github.com/akivet/Mica.git#a21c3cecefba92b11ee65b53f9241e252752eb52}
+      args:
+        # Mica's upstream default: 86 (RTX 30xx/A6000), 89 (RTX 40xx/L40S), 90 (H100/H200).
+        CUDA_ARCH: ${SYSTEMONE_CUDA_ARCH:-86;89;90}
+    restart: unless-stopped
+    ports:
+      - "${SYSTEMONE_HOST_PORT:-8010}:${SYSTEMONE_CONTAINER_PORT:-8010}"
+    environment:
+      PORT: ${SYSTEMONE_CONTAINER_PORT:-8010}
+      # These are Mica's upstream environment names; the values come from the provider-neutral
+      # SYSTEMONE_* settings in .env so a future provider can replace the image without changing
+      # the app configuration.
+      MICA_GGUF: ${SYSTEMONE_MODEL:-mica-v0.5-4b-Q8_0.gguf}
+      MICA_REPO: ${SYSTEMONE_MODEL_REPO:-sky7350/Mica-v0.5-4B}
+      MICA_REVISION: ${SYSTEMONE_MODEL_REVISION:-main}
+      MICA_NAME: ${SYSTEMONE_MODEL_NAME:-mica-v0.5-4b}
+      TZ: ${TZ:-Etc/UTC}
+    volumes:
+      # Weights are downloaded from Hugging Face on first start and cached here.
+      - systemone-weights:/weights
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: ${SYSTEMONE_GPU_COUNT:-all}
+              capabilities: [ gpu ]
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -fsS http://localhost:${SYSTEMONE_CONTAINER_PORT:-8010}/health || exit 1" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # The first start may download several GB of weights.
+      start_period: 600s
+
+volumes:
+  arrimport-data:
+  systemone-weights:

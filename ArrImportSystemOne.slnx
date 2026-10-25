@@ -1,4 +1,5 @@
 <Solution>
   <Folder Name="/Solution Items/" />
   <Project Path="ArrImportSystemOne/ArrImportSystemOne.csproj" />
+  <Project Path="ArrImportSystemOne.Tests/ArrImportSystemOne.Tests.csproj" />
 </Solution>

@@ -3,3 +3,13 @@ obj/
 /packages/
 riderModule.iml
 /_ReSharper.Caches/
+data/
+*.db
+
+# Local secrets / compose overrides
+.env
+.env.local
+
+# Editor / OS noise
+.DS_Store
+.idea/

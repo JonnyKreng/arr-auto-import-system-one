@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <title>ArrImportSystemOne · System One decisions</title>
+    <style>
+        :root {
+            --bg: #0f1216;
+            --panel: #171b22;
+            --panel-2: #1d232c;
+            --border: #2a323d;
+            --text: #e6ebf2;
+            --muted: #93a1b3;
+            --accent: #5aa9ff;
+            --green: #3ecf8e;
+            --amber: #f2b84b;
+            --red: #f2686b;
+            --violet: #b58cff;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: radial-gradient(1200px 600px at 10% -10%, #1b2a3d 0%, var(--bg) 55%) fixed;
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            padding: 20px 28px 14px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(15, 18, 22, 0.72);
+            backdrop-filter: blur(8px);
+            position: sticky;
+            top: 0;
+            z-index: 5;
+        }
+
+        header h1 {
+            font-size: 18px;
+            margin: 0;
+            letter-spacing: 0.2px;
+        }
+
+        header .sub { color: var(--muted); font-size: 13px; }
+
+        .spacer { flex: 1; }
+
+        .pill {
+            font-size: 12px;
+            padding: 4px 10px;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            background: var(--panel);
+            white-space: nowrap;
+        }
+
+        .pill.live { color: var(--green); border-color: rgba(62, 207, 142, 0.4); }
+        .pill.down { color: var(--red); border-color: rgba(242, 104, 107, 0.4); }
+        .pill.working { color: var(--amber); border-color: rgba(242, 184, 75, 0.4); }
+        .pill.paused { color: var(--amber); border-color: rgba(242, 184, 75, 0.4); }
+
+        main { padding: 20px 28px 48px; display: grid; gap: 20px; }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+        }
+
+        .panel > .panel-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 14px 18px;
+            border-bottom: 1px solid var(--border);
+            background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+        }
+
+        .panel > .panel-head h2 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: 0.3px; }
+        .panel > .panel-head .meta { color: var(--muted); font-size: 12px; }
+
+        .queue-body { padding: 14px 18px 18px; display: grid; gap: 14px; }
+
+        .queue-stats { display: flex; flex-wrap: wrap; gap: 10px; }
+
+        .stat {
+            flex: 1 1 150px;
+            background: var(--panel-2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+        }
+
+        .stat .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.6px; }
+        .stat .value { font-size: 20px; font-weight: 600; margin-top: 2px; }
+
+        .current {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 10px;
+            background: var(--panel-2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 10px 12px;
+            min-height: 44px;
+        }
+
+        .current .badge { font-size: 11px; color: var(--amber); border: 1px solid rgba(242,184,75,.4); border-radius: 999px; padding: 2px 8px; }
+        .current .file { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+        .pause-banner {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            background: rgba(242, 184, 75, 0.08);
+            border: 1px solid rgba(242, 184, 75, 0.35);
+            border-radius: 10px;
+            padding: 10px 12px;
+            color: var(--amber);
+            font-size: 13px;
+        }
+
+        .pause-banner strong { letter-spacing: .3px; }
+        .pause-banner .reason { color: var(--muted); }
+        .pause-banner[hidden] { display: none; }
+
+        .pending-list { display: flex; flex-wrap: wrap; gap: 8px; }
+        .pending-list:empty::after { content: "Nothing pending"; color: var(--muted); font-size: 13px; }
+
+        .pending-item {
+            font-size: 12px;
+            padding: 5px 10px;
+            border-radius: 8px;
+            background: var(--panel-2);
+            border: 1px solid var(--border);
+            color: var(--muted);
+            max-width: 320px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .table-wrap { overflow-x: auto; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+        thead th {
+            text-align: left;
+            padding: 10px 12px;
+            color: var(--muted);
+            font-size: 11px;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            border-bottom: 1px solid var(--border);
+            white-space: nowrap;
+            background: var(--panel-2);
+        }
+
+        tbody td { padding: 9px 12px; border-bottom: 1px solid rgba(42, 50, 61, 0.6); vertical-align: top; }
+        tbody tr:hover { background: rgba(90, 169, 255, 0.04); }
+        tbody tr:last-child td { border-bottom: 0; }
+
+        .file-cell { max-width: 320px; }
+        .file-cell .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-cell .path { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px; }
+
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 11px;
+            border: 1px solid var(--border);
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .tag.Import { color: var(--green); border-color: rgba(62,207,142,.35); }
+        .tag.RejectBlock { color: var(--red); border-color: rgba(242,104,107,.35); }
+        .tag.LeaveToHuman { color: var(--violet); border-color: rgba(181,140,255,.35); }
+        .tag.Skip { color: var(--muted); }
+        .tag.Done, .tag.Applied { color: var(--green); border-color: rgba(62,207,142,.35); }
+        .tag.SkippedDryRun { color: var(--amber); border-color: rgba(242,184,75,.35); }
+        .tag.Failed { color: var(--red); border-color: rgba(242,104,107,.35); }
+        .tag.Restarted { color: var(--violet); border-color: rgba(181,140,255,.35); }
+
+        button {
+            font: inherit;
+            font-size: 12px;
+            padding: 5px 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: var(--panel-2);
+            color: var(--text);
+            cursor: pointer;
+            transition: border-color .15s, background .15s;
+        }
+
+        button:hover { border-color: var(--accent); background: #222b36; }
+        button.primary { border-color: rgba(90,169,255,.5); color: var(--accent); }
+        button.danger { border-color: rgba(242,104,107,.4); color: var(--red); }
+        button:disabled { opacity: .45; cursor: not-allowed; }
+
+        .actions { display: flex; gap: 6px; }
+
+        .confidence { display: flex; align-items: center; gap: 8px; min-width: 96px; }
+        .bar { flex: 1; height: 6px; border-radius: 999px; background: #232b35; overflow: hidden; }
+        .bar > span { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+        .confidence.low > span { background: var(--amber); }
+
+        .empty { padding: 26px 18px; color: var(--muted); font-size: 13px; text-align: center; }
+
+        /* dialog */
+        dialog {
+            width: min(980px, 94vw);
+            max-height: 88vh;
+            padding: 0;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: var(--panel);
+            color: var(--text);
+            box-shadow: 0 30px 80px rgba(0,0,0,.55);
+        }
+
+        dialog::backdrop { background: rgba(6, 8, 11, .72); backdrop-filter: blur(3px); }
+
+        .dialog-head {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .dialog-head h3 { margin: 0; font-size: 15px; }
+        .dialog-head .sub { color: var(--muted); font-size: 12px; }
+
+        .tabs { display: flex; gap: 6px; padding: 12px 18px 0; }
+        .tab { border-radius: 8px 8px 0 0; border-bottom-color: transparent; }
+        .tab.active { color: var(--accent); border-color: var(--accent); }
+
+        .dialog-body { padding: 14px 18px 20px; overflow: auto; max-height: 64vh; }
+
+        pre {
+            margin: 0;
+            padding: 14px;
+            background: #0b0e12;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: auto;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #cfe0f5;
+        }
+
+        .kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 14px; }
+        .kv .box { background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+        .kv .label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+        .kv .value { font-size: 14px; margin-top: 3px; word-break: break-word; }
+
+        .hint { color: var(--muted); font-size: 12px; margin: 0 0 10px; }
+
+        @media (max-width: 720px) {
+            header, main { padding-left: 14px; padding-right: 14px; }
+            .file-cell, .file-cell .path { max-width: 180px; }
+        }
+    </style>
+</head>
+<body>
+<header>
+    <div>
+        <h1>ArrImportSystemOne</h1>
+        <div class="sub">System One-calibrated import decisions</div>
+    </div>
+    <div class="spacer"></div>
+    <span id="statusPill" class="pill">connecting…</span>
+    <span id="jobPill" class="pill">idle</span>
+</header>
+
+<main>
+    <section class="panel">
+        <div class="panel-head">
+            <h2>Queue</h2>
+            <span class="meta" id="queueMeta">waiting for snapshot…</span>
+        </div>
+        <div class="queue-body">
+            <div class="queue-stats">
+                <div class="stat"><div class="label">Queue</div><div class="value" id="statQueue">0</div></div>
+                <div class="stat"><div class="label">Pending</div><div class="value" id="statPending">0</div></div>
+                <div class="stat"><div class="label">Processed</div><div class="value" id="statProcessed">0</div></div>
+                <div class="stat"><div class="label">Jobs logged</div><div class="value" id="statJobs">0</div></div>
+            </div>
+            <div class="pause-banner" id="pauseBanner" hidden></div>
+            <div class="current" id="currentBox">
+                <span class="badge">idle</span>
+                <span class="file">No job in progress</span>
+            </div>
+            <div class="pending-list" id="pendingList"></div>
+        </div>
+    </section>
+
+    <section class="panel">
+        <div class="panel-head">
+            <h2>Decisions</h2>
+            <span class="meta" id="decisionsMeta">0 rows</span>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Time</th>
+                    <th>File</th>
+                    <th>Resolver</th>
+                    <th>Action</th>
+                    <th>Status</th>
+                    <th>Chosen</th>
+                    <th>Confidence</th>
+                    <th>Latency</th>
+                    <th></th>
+                </tr>
+                </thead>
+                <tbody id="decisionsBody"></tbody>
+            </table>
+            <div class="empty" id="decisionsEmpty">No decisions yet.</div>
+        </div>
+    </section>
+</main>
+
+<dialog id="detailDialog">
+    <div class="dialog-head">
+        <div>
+            <h3 id="detailTitle">Decision</h3>
+            <div class="sub" id="detailSub"></div>
+        </div>
+        <div class="spacer"></div>
+        <button id="detailClose">Close</button>
+    </div>
+    <div class="tabs">
+        <button class="tab active" data-tab="request">Request</button>
+        <button class="tab" data-tab="result">Result</button>
+    </div>
+    <div class="dialog-body">
+        <div id="tab-request">
+            <p class="hint">Persisted System One request: <code>state</code> and <code>questions</code> (including the offered <code>option_*</code> / <code>no_match</code> criteria).</p>
+            <pre id="requestJson">Loading…</pre>
+        </div>
+        <div id="tab-result" hidden>
+            <div class="kv" id="resultSummary"></div>
+            <pre id="resultJson">Loading…</pre>
+        </div>
+    </div>
+</dialog>
+
+<script src="vendor/signalr.min.js"></script>
+<script>
+(() => {
+    "use strict";
+
+    const MAX_DECISIONS = 200;
+    const decisions = new Map();
+    let jobs = [];
+
+    const $ = (id) => document.getElementById(id);
+    const statusPill = $("statusPill");
+    const jobPill = $("jobPill");
+    const body = $("decisionsBody");
+    const empty = $("decisionsEmpty");
+    const dialog = $("detailDialog");
+
+    const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+    }[c]));
+
+    const fmtTime = (iso) => {
+        if (!iso) return "";
+        const d = new Date(iso);
+        return isNaN(d) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    };
+
+    const fmtPct = (value) => `${Math.round((Number(value) || 0) * 100)}%`;
+
+    const confidenceCell = (value) => {
+        const pct = Math.round((Number(value) || 0) * 100);
+        return `<div class="confidence ${pct < 75 ? "low" : ""}">
+                    <div class="bar"><span style="width:${Math.max(0, Math.min(100, pct))}%"></span></div>
+                    <span>${pct}%</span>
+                </div>`;
+    };
+
+    function renderDecisions() {
+        const rows = [...decisions.values()].sort((a, b) => b.id - a.id);
+        $("decisionsMeta").textContent = `${rows.length} row${rows.length === 1 ? "" : "s"}`;
+        empty.style.display = rows.length ? "none" : "block";
+
+        body.innerHTML = rows.map((d) => `
+            <tr data-id="${d.id}">
+                <td>${d.id}</td>
+                <td>${esc(fmtTime(d.utcTimestamp))}</td>
+                <td class="file-cell">
+                    <div class="name" title="${esc(d.fileName)}">${esc(d.fileName || "—")}</div>
+                    <div class="path" title="${esc(d.filePath)}">${esc(d.downloadId || "")}</div>
+                </td>
+                <td><span class="tag">${esc(d.resolver)}</span></td>
+                <td><span class="tag ${esc(d.action)}">${esc(d.action)}</span></td>
+                <td><span class="tag ${esc(d.status)}">${esc(d.status)}</span></td>
+                <td>${esc(d.chosen || "—")}</td>
+                <td>${confidenceCell(d.confidence)}</td>
+                <td>${d.latencyMs != null ? `${d.latencyMs} ms` : "—"}</td>
+                <td>
+                    <div class="actions">
+                        <button class="primary" data-info="${d.id}">Info</button>
+                        <button class="danger" data-restart="${esc(d.downloadId)}" title="Clear done marker and re-enqueue">Restart</button>
+                    </div>
+                </td>
+            </tr>`).join("");
+    }
+
+    function renderQueue(queue) {
+        if (!queue) return;
+        $("statQueue").textContent = queue.queueCount ?? 0;
+        $("statPending").textContent = queue.pendingCount ?? 0;
+        $("statProcessed").textContent = queue.processedCount ?? 0;
+        $("statJobs").textContent = jobs.length;
+
+        const pending = queue.pending || [];
+        $("pendingList").innerHTML = pending.map((p) => `<span class="pending-item" title="${esc(p)}">${esc(p)}</span>`).join("");
+
+        const pauseBanner = $("pauseBanner");
+        const pauseReason = queue.pauseReason || "System One model unavailable";
+        if (queue.paused) {
+            pauseBanner.hidden = false;
+            pauseBanner.innerHTML = `
+                <strong>Paused</strong>
+                <span>Decision processing is paused while the System One model is unavailable.</span>
+                <span class="reason">${esc(pauseReason)} · downloads resume automatically.</span>`;
+        } else {
+            pauseBanner.hidden = true;
+            pauseBanner.innerHTML = "";
+        }
+
+        const currentBox = $("currentBox");
+        if (queue.paused) {
+            currentBox.innerHTML = `
+                <span class="badge">paused</span>
+                <span class="file">${esc(pauseReason)}</span>`;
+            jobPill.textContent = "paused";
+            jobPill.className = "pill paused";
+        } else if (queue.inProgress) {
+            currentBox.innerHTML = `
+                <span class="badge">resolving</span>
+                <strong>${esc(queue.currentItem || queue.currentDownloadId || "download")}</strong>
+                <span class="file">${esc(queue.currentFile || "…")}</span>`;
+            jobPill.textContent = "working";
+            jobPill.className = "pill working";
+        } else {
+            currentBox.innerHTML = `<span class="badge">idle</span><span class="file">No job in progress</span>`;
+            jobPill.textContent = "idle";
+            jobPill.className = "pill";
+        }
+
+        $("queueMeta").textContent =
+            `${queue.queueCount ?? 0} in Lidarr queue · ${queue.pendingCount ?? 0} pending · ${queue.processedCount ?? 0} processed${queue.paused ? " · paused" : ""}`;
+    }
+
+    function upsertDecision(d) {
+        decisions.set(d.id, d);
+        if (decisions.size > MAX_DECISIONS) {
+            const oldest = [...decisions.keys()].sort((a, b) => a - b)[0];
+            decisions.delete(oldest);
+        }
+        renderDecisions();
+    }
+
+    function applySnapshot(snapshot) {
+        decisions.clear();
+        (snapshot.decisions || []).forEach((d) => decisions.set(d.id, d));
+        jobs = snapshot.jobs || [];
+        renderDecisions();
+        renderQueue(snapshot.queue);
+    }
+
+    async function showDetail(id) {
+        const response = await connection.invoke("GetDecisionDetail", id);
+        if (!response) return;
+
+        const d = response.decision;
+        $("detailTitle").textContent = d.fileName || `Decision ${d.id}`;
+        $("detailSub").textContent = `${d.action} · ${d.status} · ${d.downloadId}`;
+
+        const request = response.request || {};
+        $("requestJson").textContent = JSON.stringify({
+            state: request.state ?? null,
+            questions: request.questions ?? null
+        }, null, 2);
+
+        const result = response.result;
+        if (result) {
+            $("resultSummary").innerHTML = `
+                <div class="box"><div class="label">Choice</div><div class="value">${esc(result.choice || "—")}</div></div>
+                <div class="box"><div class="label">Confidence</div><div class="value">${fmtPct(result.confidence)}</div></div>
+                <div class="box"><div class="label">Latency</div><div class="value">${result.latencyMs ?? "—"} ms</div></div>
+                <div class="box"><div class="label">Action / status</div><div class="value">${esc(d.action)} / ${esc(d.status)}</div></div>`;
+        } else {
+            $("resultSummary").innerHTML = `<div class="box"><div class="label">Result</div><div class="value">No System One result (${esc(d.error || "not called")})</div></div>`;
+        }
+        $("resultJson").textContent = result ? JSON.stringify(result, null, 2) : "No System One result for this decision.";
+
+        dialog.showModal();
+    }
+
+    body.addEventListener("click", async (event) => {
+        const info = event.target.closest("[data-info]");
+        const restart = event.target.closest("[data-restart]");
+        if (info) {
+            try { await showDetail(Number(info.dataset.info)); }
+            catch (err) { console.error(err); alert("Could not load decision detail."); }
+        } else if (restart) {
+            const downloadId = restart.dataset.restart;
+            if (!confirm(`Restart download ${downloadId}? The done marker is cleared and it will be re-enqueued.`)) return;
+            try {
+                const ok = await connection.invoke("RestartAlbum", downloadId);
+                if (!ok) alert("Restart was rejected.");
+            } catch (err) { console.error(err); alert("Restart failed."); }
+        }
+    });
+
+    $("detailClose").addEventListener("click", () => dialog.close());
+    document.querySelectorAll(".tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+            document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
+            $("tab-request").hidden = tab.dataset.tab !== "request";
+            $("tab-result").hidden = tab.dataset.tab !== "result";
+        });
+    });
+
+    const connection = new signalR.HubConnectionBuilder()
+        .withUrl("/hub/decisions")
+        .withAutomaticReconnect([0, 1000, 3000, 5000, 10000])
+        .configureLogging(signalR.LogLevel.Warning)
+        .build();
+
+    connection.on("queue.updated", renderQueue);
+    connection.on("decision.resolved", upsertDecision);
+    connection.on("job.finished", (job) => {
+        jobs = [job, ...jobs].slice(0, MAX_DECISIONS);
+        $("statJobs").textContent = jobs.length;
+    });
+
+    connection.onreconnecting(() => {
+        statusPill.textContent = "reconnecting…";
+        statusPill.className = "pill down";
+    });
+
+    connection.onreconnected(async () => {
+        statusPill.textContent = "connected";
+        statusPill.className = "pill live";
+        try { applySnapshot(await connection.invoke("GetSnapshot", MAX_DECISIONS)); }
+        catch (err) { console.error("Snapshot reload failed", err); }
+    });
+
+    connection.onclose(() => {
+        statusPill.textContent = "disconnected";
+        statusPill.className = "pill down";
+    });
+
+    (async () => {
+        try {
+            await connection.start();
+            statusPill.textContent = "connected";
+            statusPill.className = "pill live";
+            applySnapshot(await connection.invoke("GetSnapshot", MAX_DECISIONS));
+        } catch (err) {
+            console.error(err);
+            statusPill.textContent = "disconnected";
+            statusPill.className = "pill down";
+        }
+    })();
+})();
+</script>
+</body>
+</html>

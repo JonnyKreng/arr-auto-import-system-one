@@ -20,4 +20,7 @@ RUN dotnet publish "./ArrImportSystemOne.csproj" -c $BUILD_CONFIGURATION -o /app
 FROM base AS final
 WORKDIR /app
 COPY --from=publish /app/publish .
+USER root
+RUN mkdir -p /app/data && chown -R $APP_UID /app/data
+USER $APP_UID
 ENTRYPOINT ["dotnet", "ArrImportSystemOne.dll"]

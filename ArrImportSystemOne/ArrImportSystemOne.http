@@ -1,6 +1,11 @@
 @ArrImportSystemOne_HostAddress = http://localhost:5266
 
-GET {{ArrImportSystemOne_HostAddress}}/weatherforecast/
+GET {{ArrImportSystemOne_HostAddress}}/health
 Accept: application/json
+
+###
+
+GET {{ArrImportSystemOne_HostAddress}}/
+Accept: text/html
 
 ###

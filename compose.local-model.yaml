@@ -1,0 +1,36 @@
+# Local real-model stack for macOS/CPU-only hosts.
+#
+# This includes compose.yaml (the ArrImportSystemOne app) and runs the Vulkan image *without*
+# /dev/dri. On a machine with no Vulkan device, llama.cpp falls back to its CPU backend. That is
+# useful for a health/protocol smoke test, not for processing a real queue: CPU inference is very
+# slow. For fast UI/plumbing tests use compose.local.yaml (the protocol stub).
+#
+#   docker compose -f compose.local-model.yaml up -d --build
+#
+# Keep LIDARR_DRY_RUN=true locally.
+
+include:
+  - compose.yaml
+
+services:
+  systemone:
+    image: ${SYSTEMONE_VULKAN_IMAGE:-arrimportsystemone-systemone-vulkan:local}
+    build:
+      context: .
+      dockerfile: docker/systemone-vulkan/Dockerfile
+      args:
+        MICA_COMMIT: ${SYSTEMONE_MICA_COMMIT:-a21c3cecefba92b11ee65b53f9241e252752eb52}
+        LLAMA_TAG: ${SYSTEMONE_LLAMA_TAG:-b11700}
+    # No devices/group_add: this host has no DRI render node, so llama.cpp uses the CPU backend.
+    deploy: !reset {}
+    environment:
+      MICA_GGUF: ${SYSTEMONE_MODEL:-mica-v0.5-4b-Q8_0.gguf}
+      MICA_NAME: ${SYSTEMONE_MODEL_NAME:-mica-v0.5-4b}
+      # Small context keeps the CPU KV cache and startup time manageable.
+      SYSTEMONE_N_CTX: ${SYSTEMONE_LOCAL_MODEL_N_CTX:-32768}
+      SYSTEMONE_SEQS: ${SYSTEMONE_LOCAL_MODEL_SEQS:-1}
+      SYSTEMONE_STATE_CACHE: off
+      SYSTEMONE_N_UBATCH: ${SYSTEMONE_LOCAL_MODEL_N_UBATCH:-256}
+    healthcheck:
+      # First start may download the 4.5 GB weights and load them on the CPU.
+      start_period: 600s

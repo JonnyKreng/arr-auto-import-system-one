@@ -1,0 +1,33 @@
+# Local UI/plumbing stack for machines without a usable GPU (including Docker Desktop on macOS).
+#
+# This file is a complete stack: it includes compose.yaml (the ArrImportSystemOne app and shared
+# volumes) and replaces the model provider with a tiny protocol-compatible stub. Run it on its own:
+#
+#   docker compose -f compose.local.yaml up -d --build
+#
+# The stub picks the first offered track. It is NOT a decision model. Keep LIDARR_DRY_RUN=true; for
+# real decisions use compose.vulkan.yaml on the Radeon host or compose.yaml on an NVIDIA host.
+
+include:
+  - compose.yaml
+
+services:
+  systemone:
+    image: ${SYSTEMONE_LOCAL_IMAGE:-python:3.12-alpine}
+    build: !reset null
+    deploy: !reset {}
+    command: ["python", "-u", "/app/systemone-stub.py"]
+    environment:
+      PORT: ${SYSTEMONE_CONTAINER_PORT:-8010}
+    volumes:
+      - ./tools/systemone-stub.py:/app/systemone-stub.py:ro
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8010/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
