@@ -1,0 +1,7 @@
+﻿services:
+  arrimportsystemone:
+    image: arrimportsystemone
+    build:
+      context: .
+      dockerfile: ArrImportSystemOne/Dockerfile
+
