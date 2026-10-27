@@ -60,4 +60,11 @@ public sealed class DoneRecord
 {
     [BsonId] public string DownloadId { get; set; } = "";
     public DateTime DoneUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// True when the marker was written by a dry-run pass. A dry-run marker only suppresses
+    /// re-processing while <c>DryRun</c> is still enabled; once dry-run is disabled the download
+    /// becomes eligible again so its previewed Import/Reject decisions can be applied.
+    /// </summary>
+    public bool DryRun { get; set; }
 }

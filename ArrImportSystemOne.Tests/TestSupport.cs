@@ -12,7 +12,7 @@ namespace ArrImportSystemOne.Tests;
 
 internal sealed class TestOptionsMonitor<T>(T value) : IOptionsMonitor<T>
 {
-    public T CurrentValue { get; } = value;
+    public T CurrentValue { get; set; } = value;
     public T Get(string? name) => CurrentValue;
     public IDisposable? OnChange(Action<T, string?> listener) => null;
 }
@@ -64,6 +64,11 @@ internal sealed class TempRepository : IDisposable
     }
 
     public DecisionRepository Repository { get; }
+
+    /// <summary>Opens a second connection to the same LiteDB file (used to test startup migration).</summary>
+    public DecisionRepository OpenRepository() =>
+        new(new TestHostEnvironment { ContentRootPath = _dir },
+            NullLogger<DecisionRepository>.Instance);
 
     public void Dispose()
     {

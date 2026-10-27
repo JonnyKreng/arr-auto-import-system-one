@@ -7,6 +7,14 @@ This release implements the design in [`systemOne.md`](./systemOne.md).
 
 ### Fixed
 
+- **Disabling dry-run now actually applies the previewed decisions.** A dry-run pass wrote a
+  download-level `done` marker, so after `Lidarr:DryRun` was turned off the download was never
+  re-enqueued and its `Import`/`RejectBlock` decisions stayed `SkippedDryRun` forever. The marker
+  now records that it came from dry-run (`DoneRecord.DryRun`) and only suppresses work while
+  dry-run is still enabled; the per-row guard likewise stops treating `SkippedDryRun` as handled
+  once dry-run is off. Existing databases are migrated on startup by flagging markers whose
+  download only has `SkippedDryRun` decisions. The queue panel also shows a **dry run** pill so the
+  current mode is visible in the UI.
 - **System One requests are sent with `Content-Length` instead of chunked encoding.** Mica's HTTP
   server reads only `Content-Length`; a chunked body was parsed as empty and rejected with
   `request.state is required` even though the request contained a valid state.
@@ -229,7 +237,7 @@ oversubscribed.
 | Situation | Action | Status | Done marker |
 |---|---|---|---|
 | Additional file / stale / no files | `Skip` (`System`) | `Applied` | yes |
-| Import in dry-run | `Import` | `SkippedDryRun` | yes |
+| Import in dry-run | `Import` | `SkippedDryRun` | dry-run only (re-opened when `DryRun` is disabled) |
 | Import submitted | `Import` | `Done` | yes |
 | Reject + blocklist | `RejectBlock` | `Applied` | yes |
 | Low confidence / invalid request / invalid response / no candidates | `LeaveToHuman` | `Failed` (or `Applied` in dry-run) | **no** |

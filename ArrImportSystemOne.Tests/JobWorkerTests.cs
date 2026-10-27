@@ -248,7 +248,36 @@ public sealed class JobWorkerTests
         Assert.Equal("SkippedDryRun", decision.Status);
 
         Assert.DoesNotContain(harness.LidarrHandler.Requests, r => r.Method == "POST" && r.Uri.EndsWith("/command"));
+
+        // The marker only suppresses retries while dry-run stays enabled.
+        Assert.True(harness.Temp.Repository.IsDownloadDone("dl1", dryRun: true));
+        Assert.False(harness.Temp.Repository.IsDownloadDone("dl1", dryRun: false));
+    }
+
+    [Fact]
+    public async Task DryRunDecision_IsAppliedAfterDryRunIsDisabled()
+    {
+        using var harness = new Harness(dryRun: true);
+
+        await harness.Worker.ProcessJobAsync(Job(), CancellationToken.None);
+
+        Assert.Equal("SkippedDryRun", Assert.Single(harness.Temp.Repository.GetDecisions(10)).Status);
+        Assert.DoesNotContain(harness.LidarrHandler.Requests,
+            r => r.Method == "POST" && r.Uri.EndsWith("/command"));
+
+        harness.Options.CurrentValue = TestData.Options(dryRun: false);
+
+        await harness.Worker.ProcessJobAsync(Job(), CancellationToken.None);
+
+        var latest = harness.Temp.Repository.GetDecisions(10)[0];
+        Assert.Equal("Import", latest.Action);
+        Assert.Equal("Done", latest.Status);
+
+        var command = Assert.Single(harness.LidarrHandler.Requests,
+            r => r.Method == "POST" && r.Uri.EndsWith("/command"));
+        Assert.Contains("\"trackIds\":[101]", command.Body);
         Assert.True(harness.Temp.Repository.IsDownloadDone("dl1"));
+        Assert.True(harness.Temp.Repository.IsDownloadDone("dl1", dryRun: true));
     }
 
     [Fact]
@@ -367,7 +396,7 @@ public sealed class JobWorkerTests
             string? manualImportJson = null,
             IReadOnlyDictionary<int, string>? releaseTracksJson = null)
         {
-            var options = new TestOptionsMonitor<LidarrOptions>(TestData.Options(dryRun: dryRun));
+            Options = new TestOptionsMonitor<LidarrOptions>(TestData.Options(dryRun: dryRun));
 
             LidarrHandler = new StubHandler((request, _) =>
             {
@@ -400,7 +429,7 @@ public sealed class JobWorkerTests
                 NullLogger<LidarrClient>.Instance);
             var systemOne = new SystemOneDecisionClient(
                 new HttpClient(SystemOneHandler) { BaseAddress = new Uri("http://mica:8010/") },
-                options,
+                Options,
                 NullLogger<SystemOneDecisionClient>.Instance);
 
             Broadcaster = new RecordingBroadcaster();
@@ -408,18 +437,19 @@ public sealed class JobWorkerTests
             Availability = new SystemOneAvailability();
             Availability.ReportAvailable();
 
-            var progress = new WorkerProgress(Availability);
+            var progress = new WorkerProgress(Availability, Options);
             var writer = new DecisionWriter(_temp.Repository, Broadcaster);
 
             Worker = new JobWorker(
                 lidarr, systemOne, new ImportContextBuilder(NullLogger<ImportContextBuilder>.Instance),
-                _temp.Repository, Jobs, writer, progress, Availability, Broadcaster, options,
+                _temp.Repository, Jobs, writer, progress, Availability, Broadcaster, Options,
                 NullLogger<JobWorker>.Instance);
         }
 
         public TempRepository Temp => _temp;
         public StubHandler LidarrHandler { get; }
         public StubHandler SystemOneHandler { get; }
+        public TestOptionsMonitor<LidarrOptions> Options { get; }
         public RecordingBroadcaster Broadcaster { get; }
         public JobQueue Jobs { get; }
         public SystemOneAvailability Availability { get; }

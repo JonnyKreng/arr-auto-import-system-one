@@ -26,7 +26,10 @@ public sealed class QueuePoller(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         var interval = TimeSpan.FromSeconds(Math.Max(5, options.CurrentValue.PollIntervalSeconds));
-        logger.LogInformation("Queue poller started (interval {Interval}s)", interval.TotalSeconds);
+        logger.LogInformation(
+            "Queue poller started (interval {Interval}s, dry run: {DryRun})",
+            interval.TotalSeconds,
+            options.CurrentValue.DryRun);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -56,6 +59,7 @@ public sealed class QueuePoller(
 
     internal async Task PollOnceAsync(CancellationToken ct)
     {
+        var dryRun = options.CurrentValue.DryRun;
         var queue = await lidarr.GetQueueAsync(ct).ConfigureAwait(false);
         progress.ReportQueue(queue.Count);
 
@@ -65,7 +69,7 @@ public sealed class QueuePoller(
             if (string.IsNullOrWhiteSpace(downloadId) || item.Id <= 0)
                 continue;
 
-            if (repository.IsDownloadDone(downloadId) || jobs.IsInFlight(downloadId) || jobs.IsBackedOff(downloadId))
+            if (repository.IsDownloadDone(downloadId, dryRun) || jobs.IsInFlight(downloadId) || jobs.IsBackedOff(downloadId))
                 continue;
 
             // Lidarr is still downloading / auto-importing: rediscover on a later poll.
@@ -116,7 +120,8 @@ public sealed class QueuePoller(
 
     private async Task FinishWithoutRowsAsync(LidarrQueueItem item, string reason, int fileCount, CancellationToken ct)
     {
-        repository.MarkDone(item.DownloadId!);
+        // Stale cleanup and additional-file-only downloads are final regardless of dry-run.
+        repository.MarkDone(item.DownloadId!, dryRun: false);
         jobs.ClearRetry(item.DownloadId!);
 
         var record = new JobRecord

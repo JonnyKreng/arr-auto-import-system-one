@@ -1,4 +1,6 @@
+using ArrImportSystemOne.Options;
 using ArrImportSystemOne.Solver;
+using Microsoft.Extensions.Options;
 
 namespace ArrImportSystemOne.Queue;
 
@@ -7,7 +9,9 @@ namespace ArrImportSystemOne.Queue;
 /// Also carries the System One availability gate so the UI can show a paused banner.
 /// Kept from the existing design (systemOne.md §6.2).
 /// </summary>
-public sealed class WorkerProgress(SystemOneAvailability availability)
+public sealed class WorkerProgress(
+    SystemOneAvailability availability,
+    IOptionsMonitor<LidarrOptions> options)
 {
     private readonly object _sync = new();
 
@@ -81,6 +85,7 @@ public sealed class WorkerProgress(SystemOneAvailability availability)
                 _currentDownloadId,
                 _currentFile,
                 _inProgress,
+                options.CurrentValue.DryRun,
                 !available,
                 pauseReason);
         }
@@ -97,5 +102,6 @@ public sealed record QueueUpdated(
     string? CurrentDownloadId,
     string? CurrentFile,
     bool InProgress,
+    bool DryRun,
     bool Paused,
     string? PauseReason);

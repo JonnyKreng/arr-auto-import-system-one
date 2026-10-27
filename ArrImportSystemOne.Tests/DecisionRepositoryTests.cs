@@ -41,6 +41,41 @@ public sealed class DecisionRepositoryTests
     }
 
     [Fact]
+    public void DryRunDoneMarker_OnlyBlocksWhileDryRunIsEnabled()
+    {
+        using var temp = new TempRepository();
+        var repo = temp.Repository;
+
+        repo.MarkDone("dl1", dryRun: true);
+
+        Assert.True(repo.IsDownloadDone("dl1", dryRun: true));
+        Assert.False(repo.IsDownloadDone("dl1", dryRun: false));
+
+        // A real completion upgrades the marker so it stays done in either mode.
+        repo.MarkDone("dl1", dryRun: false);
+        Assert.True(repo.IsDownloadDone("dl1", dryRun: true));
+        Assert.True(repo.IsDownloadDone("dl1", dryRun: false));
+    }
+
+    [Fact]
+    public void LegacyDryRunMarker_IsMigratedOnStartup()
+    {
+        using var temp = new TempRepository();
+        temp.Repository.InsertDecision(new DecisionRecord
+        {
+            DownloadId = "dl1", RowId = 1, Action = "Import", Status = "SkippedDryRun"
+        });
+
+        // Simulate a marker written before DoneRecord knew about dry-run.
+        temp.Repository.MarkDone("dl1", dryRun: false);
+
+        using var reopened = temp.OpenRepository();
+
+        Assert.True(reopened.IsDownloadDone("dl1", dryRun: true));
+        Assert.False(reopened.IsDownloadDone("dl1", dryRun: false));
+    }
+
+    [Fact]
     public void FlagRestarted_UpdatesEveryDecisionForDownload()
     {
         using var temp = new TempRepository();

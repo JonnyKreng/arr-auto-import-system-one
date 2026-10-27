@@ -28,7 +28,39 @@ public sealed class DecisionRepository : IDisposable
         _decisions.EnsureIndex(d => d.UtcTimestamp);
         _jobs.EnsureIndex(j => j.DownloadId);
 
+        MigrateLegacyDryRunMarkers(logger);
+
         logger.LogInformation("Decision store at {Path}", path);
+    }
+
+    /// <summary>
+    /// Older databases stored done markers without the <see cref="DoneRecord.DryRun"/> flag. A
+    /// marker whose download only has <c>SkippedDryRun</c> decisions is a dry-run marker: flag it
+    /// so disabling dry-run later makes the download eligible again.
+    /// </summary>
+    private void MigrateLegacyDryRunMarkers(ILogger logger)
+    {
+        foreach (var marker in _done.FindAll().ToList())
+        {
+            if (marker.DryRun)
+                continue;
+
+            var downloadId = marker.DownloadId;
+            var decisions = _decisions.Query().Where(d => d.DownloadId == downloadId).ToList();
+
+            var hasSkippedDryRun = decisions.Any(d => d.Status == "SkippedDryRun");
+            var hasAppliedAction = decisions.Any(d =>
+                (d.Action is "Import" or "RejectBlock") && (d.Status is "Done" or "Applied"));
+
+            if (!hasSkippedDryRun || hasAppliedAction)
+                continue;
+
+            marker.DryRun = true;
+            _done.Update(marker);
+            logger.LogInformation(
+                "Migrated done marker for {DownloadId} to dry-run; it will be applied after DryRun is disabled",
+                downloadId);
+        }
     }
 
     // ---- decisions -------------------------------------------------------------------------
@@ -98,16 +130,38 @@ public sealed class DecisionRepository : IDisposable
 
     // ---- done ------------------------------------------------------------------------------
 
-    public bool IsDownloadDone(string downloadId)
+    /// <summary>
+    /// Whether a download needs no further work. A dry-run marker is only honoured while
+    /// <paramref name="dryRun"/> is true; disabling dry-run re-opens the download so its previewed
+    /// decisions can be applied.
+    /// </summary>
+    public bool IsDownloadDone(string downloadId, bool dryRun = false)
     {
         lock (_sync)
-            return _done.Exists(d => d.DownloadId == downloadId);
+        {
+            var marker = _done.FindById(downloadId);
+            return marker is not null && (!marker.DryRun || dryRun);
+        }
     }
 
-    public void MarkDone(string downloadId)
+    /// <summary>
+    /// Writes the done marker. <paramref name="dryRun"/> should be true only when the download was
+    /// finished by a dry-run pass (imports/rejects skipped). A later non-dry-run completion always
+    /// upgrades the marker so it stays done regardless of the current mode.
+    /// </summary>
+    public void MarkDone(string downloadId, bool dryRun = false)
     {
         lock (_sync)
-            _done.Upsert(new DoneRecord { DownloadId = downloadId, DoneUtc = DateTime.UtcNow });
+        {
+            var existing = _done.FindById(downloadId);
+            var effectiveDryRun = dryRun && (existing is null || existing.DryRun);
+            _done.Upsert(new DoneRecord
+            {
+                DownloadId = downloadId,
+                DoneUtc = DateTime.UtcNow,
+                DryRun = effectiveDryRun
+            });
+        }
     }
 
     public void ClearDone(string downloadId)

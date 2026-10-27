@@ -66,6 +66,7 @@
         .pill.down { color: var(--red); border-color: rgba(242, 104, 107, 0.4); }
         .pill.working { color: var(--amber); border-color: rgba(242, 184, 75, 0.4); }
         .pill.paused { color: var(--amber); border-color: rgba(242, 184, 75, 0.4); }
+        .pill.dryrun { color: var(--amber); border-color: rgba(242, 184, 75, 0.4); }
 
         main { padding: 20px 28px 48px; display: grid; gap: 20px; }
 
@@ -284,6 +285,7 @@
     </div>
     <div class="spacer"></div>
     <span id="statusPill" class="pill">connecting…</span>
+    <span id="modePill" class="pill dryrun" hidden title="Decisions are previewed only; imports and rejects are not applied">dry run</span>
     <span id="jobPill" class="pill">idle</span>
 </header>
 
@@ -373,6 +375,7 @@
 
     const $ = (id) => document.getElementById(id);
     const statusPill = $("statusPill");
+    const modePill = $("modePill");
     const jobPill = $("jobPill");
     const body = $("decisionsBody");
     const empty = $("decisionsEmpty");
@@ -428,6 +431,7 @@
 
     function renderQueue(queue) {
         if (!queue) return;
+        modePill.hidden = !queue.dryRun;
         $("statQueue").textContent = queue.queueCount ?? 0;
         $("statPending").textContent = queue.pendingCount ?? 0;
         $("statProcessed").textContent = queue.processedCount ?? 0;

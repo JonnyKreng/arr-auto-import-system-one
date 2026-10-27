@@ -81,6 +81,23 @@ public sealed class QueuePollerTests
     }
 
     [Fact]
+    public async Task DryRunDoneMarker_DoesNotBlockEnqueue_WhenDryRunIsDisabled()
+    {
+        using var harness = new Harness(QueueJson, TestData.ManualImportJson);
+        harness.Repository.InsertDecision(new Store.DecisionRecord
+        {
+            DownloadId = "dl1", RowId = 1, Action = "Import", Status = "SkippedDryRun"
+        });
+        harness.Repository.MarkDone("dl1", dryRun: true);
+
+        await harness.Poller.PollOnceAsync(CancellationToken.None);
+
+        Assert.True(harness.Jobs.IsInFlight("dl1"));
+        Assert.Equal(1, harness.Jobs.PendingCount);
+        Assert.Equal(1, harness.ManualImportRequests);
+    }
+
+    [Fact]
     public async Task EmptyRows_WhileDownloading_AreLeftForLater()
     {
         using var harness = new Harness(QueueJson.Replace("importPending", "downloading"), "[]");
@@ -127,7 +144,7 @@ public sealed class QueuePollerTests
 
             Broadcaster = new RecordingBroadcaster();
             Jobs = new JobQueue();
-            var progress = new WorkerProgress(new SystemOneAvailability());
+            var progress = new WorkerProgress(new SystemOneAvailability(), options);
             var writer = new DecisionWriter(_temp.Repository, Broadcaster);
 
             Poller = new QueuePoller(

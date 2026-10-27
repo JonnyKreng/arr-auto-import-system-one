@@ -36,7 +36,10 @@ public sealed class JobWorker(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Job worker started");
+        logger.LogInformation(
+            "Job worker started (dry run: {DryRun}, min confidence: {MinConfidence:P0})",
+            options.CurrentValue.DryRun,
+            options.CurrentValue.Model.MinConfidence);
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -137,7 +140,7 @@ public sealed class JobWorker(
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             await FinishJobAsync(job, "Failed", "None", 0, ex.Message, stopwatch.ElapsedMilliseconds,
-                markDone: false, ct).ConfigureAwait(false);
+                markDone: false, dryRunDone: false, ct).ConfigureAwait(false);
             return;
         }
 
@@ -149,7 +152,7 @@ public sealed class JobWorker(
             return;
         }
 
-        if (repository.IsDownloadDone(job.DownloadId))
+        if (repository.IsDownloadDone(job.DownloadId, dryRun))
             return;
 
         var queueItem = new LidarrQueueItem
@@ -181,11 +184,15 @@ public sealed class JobWorker(
             }
 
             // Per-row re-decision guard: already-handled import/reject rows are not re-applied.
-            // LeaveToHuman is deliberately excluded so it is retried on a later poll (never marked done).
+            // LeaveToHuman is deliberately excluded so it is retried on a later poll (never marked
+            // done). SkippedDryRun only counts while dry-run is still enabled: once it is disabled
+            // the row must be re-decided and the action applied.
             var existing = repository.FindLatest(job.DownloadId, rowId);
-            if (existing is not null
+            var alreadyHandled = existing is not null
                 && existing.Action is "Import" or "RejectBlock"
-                && existing.Status is "Done" or "Applied" or "SkippedDryRun")
+                && (existing.Status is "Done" or "Applied"
+                    || (existing.Status == "SkippedDryRun" && dryRun));
+            if (alreadyHandled)
                 continue;
 
             var candidates = await BuildCandidatesAsync(row, releaseTracks, ct).ConfigureAwait(false);
@@ -404,11 +411,12 @@ public sealed class JobWorker(
             await writer.WriteAsync(plan.Record, ct).ConfigureAwait(false);
 
         var markDone = !leftToHuman && !failed;
+        // A dry-run pass that skipped an import/reject is not final: the marker must only suppress
+        // work while dry-run is enabled. Otherwise disabling dry-run would leave the preview
+        // decisions permanently unapplied.
+        var dryRunDone = markDone && dryRun && (importPlans.Count > 0 || rejectPlans.Count > 0);
         if (markDone)
-        {
-            repository.MarkDone(job.DownloadId);
             jobs.ClearRetry(job.DownloadId);
-        }
         else
         {
             // No done marker → re-discovered next poll, with in-memory backoff to avoid a hot loop.
@@ -425,8 +433,8 @@ public sealed class JobWorker(
             outcome = "None";
 
         await FinishJobAsync(job, failed || decisionFailed ? "Failed" : "Finished", outcome, plans.Count,
-            actionError ?? (leftToHuman ? "Left to human" : null), stopwatch.ElapsedMilliseconds, markDone, ct)
-            .ConfigureAwait(false);
+            actionError ?? (leftToHuman ? "Left to human" : null), stopwatch.ElapsedMilliseconds,
+            markDone, dryRunDone, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -493,7 +501,8 @@ public sealed class JobWorker(
         jobs.ScheduleRetry(job.DownloadId, TimeSpan.FromSeconds(30));
         try
         {
-            await FinishJobAsync(job, "Failed", "None", 0, ex.Message, 0, markDone: false, ct).ConfigureAwait(false);
+            await FinishJobAsync(job, "Failed", "None", 0, ex.Message, 0,
+                markDone: false, dryRunDone: false, ct).ConfigureAwait(false);
         }
         catch (Exception inner)
         {
@@ -509,6 +518,7 @@ public sealed class JobWorker(
         string? error,
         long latencyMs,
         bool markDone,
+        bool dryRunDone,
         CancellationToken ct)
     {
         var record = new JobRecord
@@ -527,7 +537,7 @@ public sealed class JobWorker(
         record.Id = repository.InsertJob(record);
 
         if (markDone)
-            repository.MarkDone(job.DownloadId);
+            repository.MarkDone(job.DownloadId, dryRunDone);
 
         await broadcaster.JobFinishedAsync(record, ct).ConfigureAwait(false);
         logger.LogInformation(

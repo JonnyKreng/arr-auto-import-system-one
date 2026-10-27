@@ -1,3 +1,4 @@
+using ArrImportSystemOne.Options;
 using ArrImportSystemOne.Queue;
 using ArrImportSystemOne.Solver;
 
@@ -50,10 +51,12 @@ public sealed class SystemOneAvailabilityTests
     public void QueueUpdated_ReflectsAvailability()
     {
         var availability = new SystemOneAvailability();
-        var progress = new WorkerProgress(availability);
+        var options = new TestOptionsMonitor<LidarrOptions>(TestData.Options(dryRun: true));
+        var progress = new WorkerProgress(availability, options);
 
         var paused = progress.BuildQueueUpdated();
         Assert.True(paused.Paused);
+        Assert.True(paused.DryRun);
         Assert.Contains("health check", paused.PauseReason);
 
         availability.ReportAvailable();

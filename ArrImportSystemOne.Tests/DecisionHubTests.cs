@@ -1,4 +1,5 @@
 using ArrImportSystemOne.Hub;
+using ArrImportSystemOne.Options;
 using ArrImportSystemOne.Solver;
 using ArrImportSystemOne.Store;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -80,6 +81,10 @@ public sealed class DecisionHubTests
     }
 
     private static DecisionHub CreateHub(DecisionRepository repo) =>
-        new(repo, new Queue.WorkerProgress(new SystemOneAvailability()), new Queue.PollNotifier(),
+        new(repo,
+            new Queue.WorkerProgress(
+                new SystemOneAvailability(),
+                new TestOptionsMonitor<LidarrOptions>(TestData.Options())),
+            new Queue.PollNotifier(),
             NullLogger<DecisionHub>.Instance);
 }

@@ -491,8 +491,10 @@ public class MicaOptions
 2. A `JobRecord` is written for every finished download (success, failure, left-to-human).
 3. The `done` marker is written **only** when the download needs no further work: successful import,
    applied reject, or queue cleanup. A `LeaveToHuman` or Mica failure must **not** mark it done, so
-   the poller re-enqueues it on the next pass. To avoid a hot loop, an in-memory per-download retry
-   counter (or a short backoff) is enough; do not add a retry table (YAGNI).
+   the poller re-enqueues it on the next pass. A marker written by a dry-run pass (`DryRun = true`)
+   is only honoured while dry-run remains enabled; disabling it re-opens the download so the
+   previewed `SkippedDryRun` rows are decided and applied. To avoid a hot loop, an in-memory
+   per-download retry counter (or a short backoff) is enough; do not add a retry table (YAGNI).
 4. The hub method `RestartAlbum(downloadId)` deletes the done marker and flags the download's
    decisions `Restarted`; the next poll enqueues it again.
 
